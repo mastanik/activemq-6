@@ -79,13 +79,14 @@ class StompProtocolManager implements ProtocolManager, NotificationListener
 
    private final Set<String> destinations = new ConcurrentHashSet<String>();
 
-   private final List<Interceptor> interceptors;
+   private final List<Interceptor> incomingInterceptors;
+   private final List<Interceptor> outgoingInterceptors;
 
    // Static --------------------------------------------------------
 
    // Constructors --------------------------------------------------
 
-   public StompProtocolManager(final ActiveMQServer server, final List<Interceptor> interceptors)
+   public StompProtocolManager(final ActiveMQServer server, final List<Interceptor> incomingInterceptors, final List<Interceptor> outgoingInterceptors)
    {
       this.server = server;
       this.executor = server.getExecutorFactory().getExecutor();
@@ -96,7 +97,8 @@ class StompProtocolManager implements ProtocolManager, NotificationListener
          destinations.add(service.getManagementAddress().toString());
          service.addNotificationListener(this);
       }
-      this.interceptors = interceptors;
+      this.incomingInterceptors = incomingInterceptors;
+      this.outgoingInterceptors = outgoingInterceptors;
    }
 
    @Override
@@ -169,26 +171,7 @@ class StompProtocolManager implements ProtocolManager, NotificationListener
 
          try
          {
-            if (this.interceptors != null && !this.interceptors.isEmpty())
-            {
-               for (Interceptor interceptor : this.interceptors)
-               {
-                  if (interceptor instanceof StompFrameInterceptor)
-                  {
-                     try
-                     {
-                        if (!((StompFrameInterceptor)interceptor).intercept(request, conn))
-                        {
-                           break;
-                        }
-                     }
-                     catch (Exception e)
-                     {
-                        ActiveMQServerLogger.LOGGER.error(e);
-                     }
-                  }
-               }
-            }
+            invokeInterceptors(this.incomingInterceptors, request, conn);
             conn.handleFrame(request);
          }
          finally
@@ -224,6 +207,9 @@ class StompProtocolManager implements ProtocolManager, NotificationListener
       {
          ActiveMQServerLogger.LOGGER.trace("sent " + frame);
       }
+
+      invokeInterceptors(this.outgoingInterceptors, frame, connection);
+
       synchronized (connection)
       {
          if (connection.isDestroyed())
@@ -526,5 +512,29 @@ class StompProtocolManager implements ProtocolManager, NotificationListener
    public ActiveMQServer getServer()
    {
       return server;
+   }
+
+   private void invokeInterceptors(List<Interceptor> interceptors, final StompFrame frame, final StompConnection connection)
+   {
+      if (interceptors != null && !interceptors.isEmpty())
+      {
+         for (Interceptor interceptor : interceptors)
+         {
+            if (interceptor instanceof StompFrameInterceptor)
+            {
+               try
+               {
+                  if (!((StompFrameInterceptor)interceptor).intercept(frame, connection))
+                  {
+                     break;
+                  }
+               }
+               catch (Exception e)
+               {
+                  ActiveMQServerLogger.LOGGER.error(e);
+               }
+            }
+         }
+      }
    }
 }
